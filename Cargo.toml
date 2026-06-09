@@ -1,0 +1,11 @@
+[package]
+name = "iidxOnEar"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.6.1", features = ["derive"] }
+lofty = "0.24"
+ureq = "2"

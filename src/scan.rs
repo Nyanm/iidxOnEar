@@ -1,10 +1,11 @@
 //! Plan one packaging task per output Opus.
 //!
-//! Id-driven: walk the valid `MusicInfo` entries (optionally filtered to selected versions), locate each song's audio
-//! by its 5-digit id, and emit a `PackTask`. Audio lives either loose (`sound/<id5>/<id5>.s3p`, gen 30+) or packed
-//! (`sound/<id5>.ifs`, gen < 30); omnimix-revived songs are searched under the omnimix sound dir first.
+//! Id-driven: walk the valid `MusicInfo` entries (optionally filtered to selected versions), locate each song's
+//! on-disk input by its 5-digit id, and emit a `PackTask`. A song is either a loose folder `sound/<id5>/` (gen 30+)
+//! or a packed `sound/<id5>.ifs` (gen < 30); both are consumed directly by `render_song`, which resolves the keysound
+//! archive + chart inside. Omnimix-revived songs are searched under the omnimix sound dir first.
 
-use crate::common::{AudioSource, MusicInfo, PackTask, version_folder_name};
+use crate::common::{MusicInfo, PackTask, version_folder_name};
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -43,51 +44,33 @@ pub fn scan_songs(
             (_, None) => vec![path_sound],
         };
 
-        match locate_audio(&roots, &str_id5) {
-            Some(audio_src) => vec_task.push(PackTask {
+        match locate_input(&roots, &str_id5) {
+            Some(input_path) => vec_task.push(PackTask {
                 info: info.clone(),
-                audio_src,
+                input_path,
                 dst_path: build_dst(path_out, info.version, &info.str_title),
             }),
-            None => eprintln!("[skip] #{} {}: audio not found ({str_id5})", info.id, info.str_title),
+            None => eprintln!("[skip] #{} {}: song not found ({str_id5})", info.id, info.str_title),
         }
     }
 
     vec_task
 }
 
-// resolve a song's audio under the given roots, trying each root in order and returning the first hit. Loose
-// containers win over a packed ".ifs"; ".s3p" wins over ".2dx". None when nothing matches in any root.
-fn locate_audio(roots: &[&Path], str_id5: &str) -> Option<AudioSource> {
+// resolve a song's on-disk input under the given roots, trying each in order: a loose folder `<id5>/` (gen 30+) wins
+// over a packed `<id5>.ifs` (gen < 30). render_song takes either form directly. None when neither exists in any root.
+fn locate_input(roots: &[&Path], str_id5: &str) -> Option<PathBuf> {
     for root in roots {
         let path_dir = root.join(str_id5);
-        let path_s3p = path_dir.join(format!("{str_id5}.s3p"));
-        if path_s3p.is_file() {
-            return Some(AudioSource::Loose(path_s3p));
-        }
-        if let Some(path_2dx) = first_main_2dx(&path_dir, str_id5) {
-            return Some(AudioSource::Loose(path_2dx));
+        if path_dir.is_dir() {
+            return Some(path_dir);
         }
         let path_ifs = root.join(format!("{str_id5}.ifs"));
         if path_ifs.is_file() {
-            return Some(AudioSource::Ifs(path_ifs));
+            return Some(path_ifs);
         }
     }
     None
-}
-
-// pick the main loose ".2dx" for a song: the lexicographically-first "<id5>*.2dx" in `path_dir`, excluding the
-// "<id5>_pre.2dx" preview. Sorting makes a suffix-less "<id5>.2dx" win, else the lowest-suffix variant.
-fn first_main_2dx(path_dir: &Path, str_id5: &str) -> Option<PathBuf> {
-    let str_pre = format!("{str_id5}_pre.2dx");
-    let mut vec_name: Vec<String> = fs::read_dir(path_dir)
-        .ok()?
-        .flatten()
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.starts_with(str_id5) && n.ends_with(".2dx") && *n != str_pre)
-        .collect();
-    vec_name.sort();
-    vec_name.into_iter().next().map(|n| path_dir.join(n))
 }
 
 // --- omnimix patch discovery --------------------------------------------------------------------------------------

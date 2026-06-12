@@ -7,20 +7,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use anyhow::{Context, Result};
 
-/*
-************************************************************************************************************************
-封面主来源是官网 IIDX ULTIMATE MOBILE 曲目页的专辑封面 CDN(eacache)。但 27-31 代官网给的是主视觉图而非 OST 专辑封,
-故这五代改用 vgmdb 的 OST 原图(media.vgm.io, 450~1600px); 32/33 因 OST 尚未发行, 仍用官网主视觉图。下面这张表按 version
-下标存**完整 URL**(而非基址+序号运行时拼接): 来源混杂且网络资源朝令夕改, 存全量 URL 便于逐条核对/替换。空串=该版本无封面
-(34-40 占位, 死链亦可直接置空)。注意各版本本地缓存名都是 <version>.<ext>, 故换 URL 后需手动删掉对应旧文件才会重下。
-序号映射的来历(已肉眼核对封面副标题): v2-17 = 01001-01016(连续); 之后插了若干边角专辑导致错位 ——
-  01017=cs collection(跳), 21/22/23 各两碟取首张(01021/01023/01025), 01031=Rootage 重复版(跳, 26 用 01029),
-  01033=28 long ver(跳), 01038=29 主题曲(跳)。v0(1st era)与 v1(Substream 无专辑)共用 1st style 的 01000。
-下载后一律按 **<version>.<ext>** 命名(如 0.jpg / 1.jpg / 15.jpg), 不沿用源文件名 —— 这样本地查存/取用只认 version,
-与远端命名结构解耦。ext 取自 URL 末尾后缀(便于将来换 png 等)。
-************************************************************************************************************************
-*/
-
 // full source URL per version (index == version); empty == no cover. Only non-empty entries are fetched/checked.
 const VERSION_JACKET_URL: [&str; 41] = [
     "https://eacache.s.konaminet.jp/game/2dx/mobile/images/music/jk/albumjacket_01000.jpg", // 0  1st style era
@@ -82,13 +68,6 @@ pub fn jacket_path(jacket_dir: &Path, version: u8) -> Option<PathBuf> {
     (!url.is_empty()).then(|| jacket_dir.join(local_name(version, url)))
 }
 
-/*
-************************************************************************************************************************
-启动阶段的阻塞下载: 遍历表中每个有 URL 的版本, 本地 <version>.<ext> 不存在就下。已存在即跳过(增量, 想强制更新删
-jacket 目录即可)。单张失败非致命 —— 只打印错误并继续, 该版本最终就没有封面。下载顺序进行(33 张小图, 简单稳妥),
-"超时放弃"由每请求的 timeout 实现。
-************************************************************************************************************************
-*/
 // ensure every version's jacket is cached in `jacket_dir`, downloading missing ones; failures are non-fatal
 pub fn ensure_jackets(jacket_dir: &Path) -> Result<()> {
     fs::create_dir_all(jacket_dir).with_context(|| format!("creating jacket dir {}", jacket_dir.display()))?;

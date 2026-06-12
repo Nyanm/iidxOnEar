@@ -1,4 +1,4 @@
-//! Shared data definitions: the parsed song record, the audio source, the packaging task, and the per-version tables.
+//! Shared data definitions: the parsed song record, the packaging task, and the per-version name tables.
 
 use std::path::PathBuf;
 
@@ -14,18 +14,11 @@ pub struct MusicInfo {
     pub version: u8,            // game version 0..=32, picks the album/output folder (0 == 1st style era)
 }
 
-// where a song's main audio lives on disk; both variants resolve to "largest block of the inner container" at unpack
-#[derive(Debug, Clone)]
-pub enum AudioSource {
-    Loose(PathBuf),             // a standalone container; ".s3p" -> WMA blocks, ".2dx" -> WAV blocks (by extension)
-    Ifs(PathBuf),               // a packed "<id5>.ifs"; unpack magic-scans S3P0 (WMA) then 2DX9 (WAV)
-}
-
-// one Opus file to produce: the resolved audio source, the song metadata, and the output path
+// one Opus file to produce: the song's on-disk input, the metadata, and the output path
 #[derive(Debug, Clone)]
 pub struct PackTask {
     pub info: MusicInfo,        // song metadata, source of the Vorbis tags
-    pub audio_src: AudioSource, // the s3p (loose or inside an ifs) to extract the full mix from
+    pub input_path: PathBuf,    // the song folder (v30+) or "<id5>.ifs" (v1-29) handed to iidx_on_knitting::render_song
     pub dst_path: PathBuf,      // output ".opus" path
 }
 

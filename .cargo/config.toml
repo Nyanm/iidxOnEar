@@ -1,0 +1,10 @@
+# FFMPEG_DIR points ffmpeg-sys-the-third (pulled in transitively via the iidx_on_knitting dependency) at the vendored
+# trimmed FFmpeg in the sibling iidxOnKnitting repo. Cargo only reads the TOP package's .cargo/config.toml, NOT a
+# dependency's, so iidxOnEar must set this itself even though iidxOnKnitting has the same line (see its DECISION D7).
+# `relative = true` resolves against this project root, keeping the repo portable; no force= so an external env wins.
+#
+# First clean build also needs LLVM\bin on PATH so bindgen finds libclang.dll, e.g. in bash:
+#   export PATH="/c/Program Files/LLVM/bin:$PATH"
+# Incremental builds need nothing extra.
+[env]
+FFMPEG_DIR = { value = "../iidxOnKnitting/vendor", relative = true }

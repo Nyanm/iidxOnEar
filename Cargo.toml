@@ -9,3 +9,6 @@ anyhow = "1.0"
 clap = { version = "4.6.1", features = ["derive"] }
 lofty = "0.24"
 ureq = "2"
+# full-song renderer (BMS-style keysound reconstruction -> Ogg/Opus); sibling repo, see .cargo/config.toml for FFMPEG_DIR.
+# package is "iidxOnKnitting" (lib name "iidx_on_knitting"); alias the dep key so `use iidx_on_knitting` resolves.
+iidx_on_knitting = { path = "../iidxOnKnitting", package = "iidxOnKnitting" }

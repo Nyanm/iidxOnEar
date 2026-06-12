@@ -2,8 +2,7 @@
 /.claude
 /.idea
 /.sample
+/.document
 /target
-/script/out
-/music_data.csv
-/ffmpeg.exe
+/*.csv
 /jacket

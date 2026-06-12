@@ -1,7 +1,7 @@
-//! IidxOnEar entry point: load the DB (+omnimix), plan one task per selected song, then unpack+transcode each to Opus.
+//! IidxOnEar entry point: load the DB (+omnimix), plan one task per selected song, then render+tag each to Opus.
 
 use music_db::{load_index, merge_omnimix};
-use packer::{ensure_ffmpeg, package};
+use packer::package;
 use scan::{filter_existing, find_omnimix, scan_songs};
 use tool::dump_music_csv;
 
@@ -18,7 +18,6 @@ mod music_db;
 mod packer;
 mod scan;
 mod tool;
-mod unpack;
 
 // command-line arguments
 #[derive(Parser)]
@@ -43,10 +42,6 @@ struct Cli {
     /// number of parallel workers [default: logical CPU count]
     #[arg(short, long)]
     jobs: Option<usize>,
-
-    /// unpack every planned song's audio (no transcode) and report the WMA/WAV split + failures
-    #[arg(long)]
-    check: bool,
 
     /// dump the parsed database to ./music_data.csv and exit (for auditing the decode)
     #[arg(long)]
@@ -111,14 +106,7 @@ fn main() -> Result<()> {
     let mut vec_task = scan_songs(&path_sound, path_sound_omni.as_deref(), &path_out, &vec_music, &cli.versions);
     print_plan(&vec_task, &path_out);
 
-    // --check: unpack every planned song's audio to validate the extractor, then exit without transcoding
-    if cli.check {
-        run_check(&vec_task);
-        return Ok(());
-    }
-
-    // verify ffmpeg first; fetch album jackets (unless skipped); drop already-converted songs unless --force
-    ensure_ffmpeg()?;
+    // fetch album jackets (unless skipped); drop already-converted songs unless --force; then run the worker pool
     if !cli.skip_jacket {
         jacket::ensure_jackets(&path_jacket)?;
     }
@@ -165,45 +153,16 @@ fn convert_all(vec_task: &[common::PackTask], jobs: usize, jacket_dir: Option<&P
     println!("done: {} converted, {count_fail} failed", count_total - count_fail);
 }
 
-// unpack one song's audio and package it into the tagged opus at its destination, embedding the version's cached jacket
+// render one song (via iidx_on_knitting) and package it into the tagged opus, embedding the version's cached jacket
 fn convert_one(task: &common::PackTask, jacket_dir: Option<&Path>) -> Result<()> {
-    let blob = unpack::unpack(&task.audio_src)?;
     let jacket = jacket_dir
         .and_then(|dir| jacket::jacket_path(dir, task.info.version))
         .filter(|path| path.exists());
-    package(&task.info, &blob, jacket.as_deref(), &task.dst_path)
-}
-
-// unpack each planned task's audio (no transcode), tallying the WMA/WAV split, failures, and total bytes extracted
-fn run_check(vec_task: &[common::PackTask]) {
-    let (mut count_wma, mut count_wav, mut count_fail) = (0u32, 0u32, 0u32);
-    let mut bytes_total: u64 = 0;
-    for task in vec_task {
-        match unpack::unpack(&task.audio_src) {
-            Ok(blob) => {
-                bytes_total += blob.len() as u64;
-                match blob {
-                    unpack::AudioBlob::Wma(_) => count_wma += 1,
-                    unpack::AudioBlob::Wav(_) => count_wav += 1,
-                }
-            }
-            Err(e) => {
-                count_fail += 1;
-                if count_fail <= 20 {
-                    eprintln!("[unpack-fail] #{} {}: {e:#}", task.info.id, task.info.str_title);
-                }
-            }
-        }
-    }
-    println!(
-        "unpack check: {} ok ({count_wma} wma + {count_wav} wav), {count_fail} failed, {} MiB extracted",
-        count_wma + count_wav,
-        bytes_total / (1024 * 1024),
-    );
+    package(&task.info, &task.input_path, jacket.as_deref(), &task.dst_path)
 }
 
 // print the planned task count overall and broken down per version
-fn print_plan(vec_task: &[common::PackTask], path_out: &std::path::Path) {
+fn print_plan(vec_task: &[common::PackTask], path_out: &Path) {
     let mut map_per_version: BTreeMap<u8, usize> = BTreeMap::new();
     for task in vec_task {
         *map_per_version.entry(task.info.version).or_default() += 1;

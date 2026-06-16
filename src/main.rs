@@ -158,7 +158,7 @@ fn convert_one(task: &common::PackTask, jacket_dir: Option<&Path>) -> Result<()>
     let jacket = jacket_dir
         .and_then(|dir| jacket::jacket_path(dir, task.info.version))
         .filter(|path| path.exists());
-    package(&task.info, &task.input_path, jacket.as_deref(), &task.dst_path)
+    package(&task.info, &task.input, jacket.as_deref(), &task.dst_path)
 }
 
 // print the planned task count overall and broken down per version

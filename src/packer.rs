@@ -4,13 +4,13 @@
 //! All the heavy lifting (ifs/folder resolution, WMA/WAV keysound decode, mixing, Opus encoding) lives in
 //! `iidx_on_knitting::render_song`; here we only pick a difficulty, tag the result, and finalize it atomically.
 
-use crate::common::{ALBUM_ARTIST, MusicInfo, version_album_name};
+use crate::common::{ALBUM_ARTIST, MusicInfo, SongInput, version_album_name};
 
 use std::fs;
 use std::path::Path;
 use anyhow::{Context, Result};
 
-use iidx_on_knitting::{Difficulty, RenderError, render_song, convert_song};
+use iidx_on_knitting::{Difficulty, RenderError, convert_song, render_packed_song, render_song};
 use lofty::config::WriteOptions;
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::prelude::*;
@@ -23,7 +23,7 @@ const DIFFICULTY_PRIORITY: [Difficulty; 10] = [
 ];
 
 // render the song to Opus via iidx_on_knitting, then attach the Vorbis tags + cover; jacket == None embeds no cover
-pub fn package(info: &MusicInfo, input_path: &Path, jacket: Option<&Path>, dst_path: &Path) -> Result<()> {
+pub fn package(info: &MusicInfo, input: &SongInput, jacket: Option<&Path>, dst_path: &Path) -> Result<()> {
     if let Some(path_parent) = dst_path.parent() {
         fs::create_dir_all(path_parent).with_context(|| format!("creating output dir {}", path_parent.display()))?;
     }
@@ -31,7 +31,7 @@ pub fn package(info: &MusicInfo, input_path: &Path, jacket: Option<&Path>, dst_p
     // render to a temp Ogg/Opus next to the destination, then tag + atomically rename, so an interrupted run never
     // leaves a half-written file the incremental scan would mistake for done
     let path_tmp = dst_path.with_extension("part.ogg");
-    let result = render_any_difficulty(input_path, &path_tmp).and_then(|()| write_tags(info, jacket, &path_tmp));
+    let result = render_any_difficulty(input, &path_tmp).and_then(|()| write_tags(info, jacket, &path_tmp));
     if let Err(e) = result {
         let _ = fs::remove_file(&path_tmp);                            // best-effort cleanup of the partial output
         return Err(e);
@@ -40,23 +40,25 @@ pub fn package(info: &MusicInfo, input_path: &Path, jacket: Option<&Path>, dst_p
     Ok(())
 }
 
-// render via render_song, trying difficulties in priority order until one succeeds (a song may lack some slots)
-fn render_any_difficulty(input_path: &Path, out_ogg: &Path) -> Result<()> {
-    let mut first_err = None;
+fn render_any_difficulty(input: &SongInput, out_ogg: &Path) -> Result<()> {
+    let mut first_err: Option<RenderError> = None;
     for difficulty in DIFFICULTY_PRIORITY {
-        match render_song(input_path, out_ogg, difficulty) {
+        let result = match input {
+            SongInput::Loose { audio, chart } => render_song(audio, chart, out_ogg, difficulty),
+            SongInput::Packed(ifs) => render_packed_song(ifs, out_ogg, difficulty),
+        };
+        match result {
             Ok(()) => return Ok(()),
-            Err(RenderError::NotKeysound) => {
-                convert_song(input_path, out_ogg)?;
-                return Ok(());
-            }
-            Err(RenderError::Failed(e)) => {
-                first_err.get_or_insert(e);                           // keep the first (SPN) error, then try the next
-            }
+            Err(RenderError::NotKeysound) => match input {
+                // a loose pre-mixed audio file: transcode it directly (difficulty-independent, so return now)
+                SongInput::Loose { audio, .. } => return convert_song(audio, out_ogg).map_err(Into::into),
+                SongInput::Packed(_) => { first_err.get_or_insert(RenderError::NotKeysound); }
+            },
+            Err(e) => { first_err.get_or_insert(e); }                 // missing slot / decode failure -> try next difficulty
         }
     }
     // every difficulty failed; surface the first (SPN) error — far more useful than the last (DPL, absent for ~all songs)
-    Err(first_err.expect("DIFFICULTY_PRIORITY is non-empty"))
+    Err(first_err.expect("DIFFICULTY_PRIORITY is non-empty").into())
 }
 
 // lofty: attach the Vorbis comments + optional front-cover picture to the rendered Ogg/Opus

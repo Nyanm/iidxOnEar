@@ -5,7 +5,7 @@
 //! or a packed `sound/<id5>.ifs` (gen < 30); both are consumed directly by `render_song`, which resolves the keysound
 //! archive + chart inside. Omnimix-revived songs are searched under the omnimix sound dir first.
 
-use crate::common::{MusicInfo, PackTask, version_folder_name};
+use crate::common::{MusicInfo, PackTask, SongInput, version_folder_name};
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -45,9 +45,9 @@ pub fn scan_songs(
         };
 
         match locate_input(&roots, &str_id5) {
-            Some(input_path) => vec_task.push(PackTask {
+            Some(input) => vec_task.push(PackTask {
                 info: info.clone(),
-                input_path,
+                input,
                 dst_path: build_dst(path_out, info.version, &info.str_title),
             }),
             None => eprintln!("[skip] #{} {}: song not found ({str_id5})", info.id, info.str_title),
@@ -57,20 +57,56 @@ pub fn scan_songs(
     vec_task
 }
 
-// resolve a song's on-disk input under the given roots, trying each in order: a loose folder `<id5>/` (gen 30+) wins
-// over a packed `<id5>.ifs` (gen < 30). render_song takes either form directly. None when neither exists in any root.
-fn locate_input(roots: &[&Path], str_id5: &str) -> Option<PathBuf> {
+// resolve a song's on-disk input under the given roots (first hit wins): a loose folder with a `.1` chart pairs it with
+// the song's `.s3p` or a `.2dx` (Loose); a folder holding an `.ifs`, or a bare `<id5>.ifs`, is Packed. None if nothing.
+fn locate_input(roots: &[&Path], str_id5: &str) -> Option<SongInput> {
     for root in roots {
         let path_dir = root.join(str_id5);
         if path_dir.is_dir() {
-            return Some(path_dir);
+            let path_chart = path_dir.join(format!("{str_id5}.1"));
+            if path_chart.is_file() {
+                let path_s3p = path_dir.join(format!("{str_id5}.s3p"));
+                if path_s3p.is_file() {
+                    return Some(SongInput::Loose { audio: path_s3p, chart: path_chart });
+                }
+                if let Some(path_2dx) = pick_loose_2dx(&path_dir, str_id5) {
+                    return Some(SongInput::Loose { audio: path_2dx, chart: path_chart });
+                }
+            }
+            let path_ifs_in = path_dir.join(format!("{str_id5}.ifs"));
+            if path_ifs_in.is_file() {
+                return Some(SongInput::Packed(path_ifs_in));
+            }
         }
         let path_ifs = root.join(format!("{str_id5}.ifs"));
         if path_ifs.is_file() {
-            return Some(path_ifs);
+            return Some(SongInput::Packed(path_ifs));
         }
     }
     None
+}
+
+// pick the keysound `.2dx` in a loose folder: among the non-preview `<id5>*.2dx`, prefer `<id5>a` > `<id5>1` > `<id5>`
+// (matching iidx_on_knitting's multi-source choice), else the first by name. None when the folder has no main `.2dx`.
+fn pick_loose_2dx(path_dir: &Path, str_id5: &str) -> Option<PathBuf> {
+    let str_pre = format!("{str_id5}_pre.2dx");
+    let mut vec_name: Vec<String> = fs::read_dir(path_dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(str_id5) && n.ends_with(".2dx") && *n != str_pre)
+        .collect();
+    if vec_name.is_empty() {
+        return None;
+    }
+    vec_name.sort();
+    for suffix in ["a", "1", ""] {
+        let str_wanted = format!("{str_id5}{suffix}.2dx");
+        if vec_name.iter().any(|n| *n == str_wanted) {
+            return Some(path_dir.join(str_wanted));
+        }
+    }
+    Some(path_dir.join(&vec_name[0]))
 }
 
 // --- omnimix patch discovery --------------------------------------------------------------------------------------

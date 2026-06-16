@@ -14,11 +14,18 @@ pub struct MusicInfo {
     pub version: u8,            // game version 0..=32, picks the album/output folder (0 == 1st style era)
 }
 
+// where a song lives on disk, shaped for the iidx_on_knitting entry points
+#[derive(Debug, Clone)]
+pub enum SongInput {
+    Loose { audio: PathBuf, chart: PathBuf },  // separate audio (.s3p/.2dx) + chart (.1) -> render_song; NotKeysound -> convert_song
+    Packed(PathBuf),                            // an .ifs holding both audio + chart -> render_packed_song
+}
+
 // one Opus file to produce: the song's on-disk input, the metadata, and the output path
 #[derive(Debug, Clone)]
 pub struct PackTask {
     pub info: MusicInfo,        // song metadata, source of the Vorbis tags
-    pub input_path: PathBuf,    // the song folder (v30+) or "<id5>.ifs" (v1-29) handed to iidx_on_knitting::render_song
+    pub input: SongInput,       // how the song is packaged on disk (selects the iidx_on_knitting entry point)
     pub dst_path: PathBuf,      // output ".opus" path
 }
 

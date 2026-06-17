@@ -1,6 +1,6 @@
 //! IidxOnEar entry point: load the DB (+omnimix), plan one task per selected song, then render+tag each to Opus.
 
-use music_db::{load_index, merge_omnimix};
+use music_db::{load_index, merge_omnimix, merge_override};
 use packer::package;
 use scan::{filter_existing, find_omnimix, scan_songs};
 use tool::dump_music_csv;
@@ -68,12 +68,12 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // load the base database from <src>/data/info/0/music_data.bin
-    let path_bin = cli.src.join("data").join("info").join("0").join("music_data.bin");
-    if !path_bin.is_file() {
-        bail!("music_data.bin not found: {} (is --src pointing at the IIDX 'contents' directory?)", path_bin.display());
+    let mut vec_music: Vec<common::MusicInfo> = Vec::new();
+    load_db_into(&mut vec_music, &cli.src.join("data").join("info").join("0").join("music_data.bin"), "info/0");
+    load_db_into(&mut vec_music, &cli.src.join("data").join("info").join("1").join("music_data.bin"), "info/1");
+    if !vec_music.iter().any(|m| m.is_valid) {
+        bail!("no usable music_data.bin under {} (looked in data/info/0 and data/info/1)", cli.src.display());
     }
-    let mut vec_music = load_index(&path_bin)?;
 
     // fold in an omnimix patch if installed (revived deleted songs), searched up to 2 levels under the contents dir
     let path_omni = find_omnimix(&cli.src);
@@ -151,6 +151,21 @@ fn convert_all(vec_task: &[common::PackTask], jobs: usize, jacket_dir: Option<&P
     });
     let count_fail = count_fail.load(Ordering::Relaxed);
     println!("done: {} converted, {count_fail} failed", count_total - count_fail);
+}
+
+// load one music_data.bin into `vec_music` with overlay-wins merge (so info/1, loaded after info/0, takes priority);
+// a missing or unparseable bin (e.g. the older v31-format info/1) is skipped with a note, never fatal
+fn load_db_into(vec_music: &mut Vec<common::MusicInfo>, path_bin: &Path, label: &str) {
+    if !path_bin.is_file() {
+        return;
+    }
+    match load_index(path_bin) {
+        Ok(vec_loaded) => {
+            let count_new = merge_override(vec_music, vec_loaded);
+            println!("{label}: +{count_new} songs");
+        }
+        Err(e) => eprintln!("{label}: skipped ({e:#})"),
+    }
 }
 
 // render one song (via iidx_on_knitting) and package it into the tagged opus, embedding the version's cached jacket

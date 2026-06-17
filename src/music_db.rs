@@ -73,6 +73,26 @@ pub fn merge_omnimix(vec_base: &mut Vec<MusicInfo>, vec_omni: Vec<MusicInfo>) ->
     count_added
 }
 
+// fold an overlay DB into the base with the OVERLAY winning: each valid overlay song overwrites the base entry at its
+// id (and fills gaps). Returns how many ids were newly added (not already valid in the base).
+pub fn merge_override(vec_base: &mut Vec<MusicInfo>, vec_overlay: Vec<MusicInfo>) -> usize {
+    let mut count_added = 0;
+    for info in vec_overlay {
+        if !info.is_valid {
+            continue;
+        }
+        let idx = info.id as usize;
+        if idx >= vec_base.len() {
+            vec_base.resize(idx + 1, MusicInfo::default());
+        }
+        if !vec_base[idx].is_valid {
+            count_added += 1;
+        }
+        vec_base[idx] = info;
+    }
+    count_added
+}
+
 // read one fixed-size entry into a MusicInfo; `song_id` is the entry's own id (0x67C), the canonical key
 fn parse_entry(song_id: u32, e: &[u8]) -> MusicInfo {
     MusicInfo {

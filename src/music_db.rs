@@ -50,13 +50,14 @@ fn parse_index(data: &[u8]) -> Result<Vec<MusicInfo>> {
     Ok(vec_music)
 }
 
-// --- omnimix merge ------------------------------------------------------------------------------------------------
+// --- DB merge: fold one parsed DB into another --------------------------------------------------------------------
 
-// fold an omnimix index into the base one: each valid omni song fills a gap in `vec_base` and is flagged is_omnimix.
-// existing valid base entries are never overwritten. returns how many were added.
-pub fn merge_omnimix(vec_base: &mut Vec<MusicInfo>, vec_omni: Vec<MusicInfo>) -> usize {
+// fold an overlay DB into the base. `overwrite`: overlay songs replace existing base entries (info/1 priority); when
+// false only gaps are filled and existing entries win (omnimix). `mark_omnimix`: flag every placed song is_omnimix so
+// the scanner searches the omni sound dir. Returns the count of newly-added ids (gaps that got filled).
+fn merge_into(vec_base: &mut Vec<MusicInfo>, vec_overlay: Vec<MusicInfo>, overwrite: bool, mark_omnimix: bool) -> usize {
     let mut count_added = 0;
-    for mut info in vec_omni {
+    for mut info in vec_overlay {
         if !info.is_valid {
             continue;
         }
@@ -64,33 +65,28 @@ pub fn merge_omnimix(vec_base: &mut Vec<MusicInfo>, vec_omni: Vec<MusicInfo>) ->
         if idx >= vec_base.len() {
             vec_base.resize(idx + 1, MusicInfo::default());
         }
-        if !vec_base[idx].is_valid {
-            info.is_omnimix = true;
+        let is_gap = !vec_base[idx].is_valid;
+        if is_gap || overwrite {
+            info.is_omnimix = mark_omnimix;
             vec_base[idx] = info;
+        }
+        if is_gap {
             count_added += 1;
         }
     }
     count_added
 }
 
-// fold an overlay DB into the base with the OVERLAY winning: each valid overlay song overwrites the base entry at its
-// id (and fills gaps). Returns how many ids were newly added (not already valid in the base).
+// fold an overlay DB into the base with the OVERLAY winning (overwrites + fills gaps); used for info/0 ∪ info/1 with
+// info/1 priority. Returns how many ids were newly added (not already valid in the base).
 pub fn merge_override(vec_base: &mut Vec<MusicInfo>, vec_overlay: Vec<MusicInfo>) -> usize {
-    let mut count_added = 0;
-    for info in vec_overlay {
-        if !info.is_valid {
-            continue;
-        }
-        let idx = info.id as usize;
-        if idx >= vec_base.len() {
-            vec_base.resize(idx + 1, MusicInfo::default());
-        }
-        if !vec_base[idx].is_valid {
-            count_added += 1;
-        }
-        vec_base[idx] = info;
-    }
-    count_added
+    merge_into(vec_base, vec_overlay, true, false)
+}
+
+// fold an omnimix patch into the base: fill only gaps (existing entries win), flagging revived songs is_omnimix.
+// Returns how many were added.
+pub fn merge_omnimix(vec_base: &mut Vec<MusicInfo>, vec_omni: Vec<MusicInfo>) -> usize {
+    merge_into(vec_base, vec_omni, false, true)
 }
 
 // read one fixed-size entry into a MusicInfo; `song_id` is the entry's own id (0x67C), the canonical key

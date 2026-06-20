@@ -49,11 +49,14 @@ fn render_any_difficulty(input: &SongInput, out_ogg: &Path) -> Result<()> {
         };
         match result {
             Ok(()) => return Ok(()),
-            Err(RenderError::NotKeysound) => match input {
-                // a loose pre-mixed audio file: transcode it directly (difficulty-independent, so return now)
-                SongInput::Loose { audio, .. } => return convert_song(audio, out_ogg).map_err(Into::into),
-                SongInput::Packed(_) => { first_err.get_or_insert(RenderError::NotKeysound); }
-            },
+            // NotKeysound = the audio is pre-mixed (checked before the chart, so difficulty-independent): stop retrying
+            // and return now. A loose audio file is transcoded directly; a packed .ifs has no separate file to convert.
+            Err(RenderError::NotKeysound) => {
+                return match input {
+                    SongInput::Loose { audio, .. } => convert_song(audio, out_ogg).map_err(Into::into),
+                    SongInput::Packed(_) => Err(RenderError::NotKeysound.into()),
+                };
+            }
             Err(e) => { first_err.get_or_insert(e); }                 // missing slot / decode failure -> try next difficulty
         }
     }
